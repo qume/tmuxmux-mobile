@@ -30,6 +30,41 @@ fn drain(conn: &SshConnection, secs: u64, tag: &str) -> Vec<u8> {
 fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let args: Vec<String> = std::env::args().skip(1).collect();
+
+    // `ssh_test <config.json>`: load the first host from a Config JSON (used to
+    // test the jump-command path against a real fleet). Lists sessions, then
+    // attaches to the first one found.
+    if let Some(path) = args.first().filter(|a| a.ends_with(".json")) {
+        let s = std::fs::read_to_string(path).expect("read config");
+        let cfg: tmuxmux_mobile::config::Config = serde_json::from_str(&s).expect("parse config");
+        let h = cfg.hosts.into_iter().next().expect("no hosts");
+        println!("jump test: host={} command={:?}", h.host, if h.command.is_empty() { "<none>" } else { "<set>" });
+        let conn = SshConnection::connect(h);
+        conn.send(ToSsh::ListSessions);
+        let mut sessions = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(12);
+        'outer: while Instant::now() < deadline {
+            for ev in conn.poll() {
+                match ev {
+                    FromSsh::Status(s) => println!("[list] {s}"),
+                    FromSsh::Error(e) => println!("[list] ERROR: {e}"),
+                    FromSsh::SessionList(l) => { println!("[list] sessions: {l:?}"); sessions = l; break 'outer; }
+                    _ => {}
+                }
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let target = sessions.first().cloned().unwrap_or_else(|| "main".into());
+        println!("--- attaching to '{target}' ---");
+        conn.send(ToSsh::Attach { session: target, rows: 24, cols: 80 });
+        let out = drain(&conn, 4, "attach");
+        println!("--- screen bytes: {} ---", out.len());
+        let text = String::from_utf8_lossy(&out);
+        for line in text.lines().take(8) { println!("| {line}"); }
+        conn.send(ToSsh::Disconnect);
+        std::process::exit(if out.is_empty() { 1 } else { 0 });
+    }
+
     let host = args.first().cloned().unwrap_or_else(|| "127.0.0.1".into());
     let user = args
         .get(1)

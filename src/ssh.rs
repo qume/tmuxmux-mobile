@@ -194,6 +194,14 @@ async fn run_connection(
 
     emit!(FromSsh::Status(format!("Connected to {}", host.display_name())));
 
+    // When a jump command is set, tmux runs at the far end of it (on the box
+    // reached by that command); otherwise tmux runs directly on `host`.
+    let prefix = if host.command.trim().is_empty() {
+        String::new()
+    } else {
+        format!("{} ", host.command.trim())
+    };
+
     // Command loop. `tmux ls` and attaching each use their own channel; while
     // attached we run an inner loop that also services input/resize.
     loop {
@@ -203,14 +211,15 @@ async fn run_connection(
         };
         match cmd {
             ToSsh::ListSessions => {
-                match list_sessions(&mut handle).await {
+                match list_sessions(&mut handle, &prefix).await {
                     Ok(list) => emit!(FromSsh::SessionList(list)),
                     Err(e) => emit!(FromSsh::Error(format!("tmux ls: {e}"))),
                 }
             }
             ToSsh::Attach { session, rows, cols } => {
                 if let Err(e) =
-                    attach_loop(&mut handle, &session, rows, cols, &mut to_rx, &from_tx).await
+                    attach_loop(&mut handle, &prefix, &session, rows, cols, &mut to_rx, &from_tx)
+                        .await
                 {
                     let _ = from_tx.send(FromSsh::Error(format!("attach: {e}")));
                 }
@@ -233,18 +242,21 @@ async fn run_connection(
 /// Run `tmux ls`, returning the list of session names.
 async fn list_sessions(
     handle: &mut client::Handle<ClientHandler>,
+    prefix: &str,
 ) -> Result<Vec<String>, russh::Error> {
     let mut channel = handle.channel_open_session().await?;
-    // `-F` keeps the output to bare names, one per line.
-    channel
-        .exec(true, "tmux list-sessions -F '#{session_name}'")
-        .await?;
+    // Plain `tmux ls` (not `-F '#{...}'`): the `#{}` format string doesn't
+    // survive quoting across a jump-command's extra shell hop (the `#` starts
+    // a comment on the far shell). We parse the "name: N windows …" lines,
+    // which also lets us ignore any login banner/motd noise from the jump.
+    let cmd = format!("{prefix}tmux ls");
+    channel.exec(true, cmd.as_str()).await?;
 
     let mut out: Vec<u8> = Vec::new();
     loop {
         match channel.wait().await {
             Some(ChannelMsg::Data { ref data }) => out.extend_from_slice(data),
-            Some(ChannelMsg::ExtendedData { .. }) => {} // stderr (e.g. "no server running")
+            Some(ChannelMsg::ExtendedData { ref data, .. }) => out.extend_from_slice(data),
             Some(ChannelMsg::Eof) | Some(ChannelMsg::Close) => break,
             Some(ChannelMsg::ExitStatus { .. }) => {}
             Some(_) => {}
@@ -254,9 +266,19 @@ async fn list_sessions(
     let text = String::from_utf8_lossy(&out);
     let sessions = text
         .lines()
-        .map(|l| l.trim())
-        .filter(|l| !l.is_empty())
-        .map(|l| l.to_string())
+        .filter_map(|l| {
+            let l = l.trim();
+            // tmux ls lines look like "name: 3 windows (created …) …".
+            let (name, rest) = l.split_once(':')?;
+            if name.is_empty() || name.contains(char::is_whitespace) {
+                return None;
+            }
+            if rest.contains("windows") || rest.contains("window") {
+                Some(name.to_string())
+            } else {
+                None
+            }
+        })
         .collect();
     Ok(sessions)
 }
@@ -264,6 +286,7 @@ async fn list_sessions(
 /// Open a PTY channel and stream it to/from the UI until detach/EOF.
 async fn attach_loop(
     handle: &mut client::Handle<ClientHandler>,
+    prefix: &str,
     session: &str,
     rows: u16,
     cols: u16,
@@ -278,7 +301,7 @@ async fn attach_loop(
     // `new-session -A` attaches if it exists, creates otherwise — one round
     // trip, no race. `-u` forces UTF-8 so box-drawing renders.
     let escaped = session.replace('\'', "'\\''");
-    let cmd = format!("tmux -u new-session -A -s '{}'", escaped);
+    let cmd = format!("{prefix}tmux -u new-session -A -s '{escaped}'");
     channel.exec(true, cmd.as_str()).await?;
 
     if from_tx.send(FromSsh::Attached).is_err() {

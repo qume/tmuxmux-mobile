@@ -30,6 +30,13 @@ pub struct Host {
     /// Passphrase for an encrypted `private_key`.
     #[serde(default)]
     pub key_passphrase: String,
+    /// Optional jump command run on `host` to reach the real target, e.g.
+    /// `sshpass -p PW ssh -tt -o ProxyCommand="cloudflared access ssh …" dev@X`.
+    /// When set, tmux runs at the end of THIS command on the far side (so the
+    /// phone only needs to reach the jump box, e.g. `host` over Tailscale).
+    /// Empty = connect to `host` directly and run tmux there.
+    #[serde(default)]
+    pub command: String,
 }
 
 impl Default for Host {
@@ -42,6 +49,7 @@ impl Default for Host {
             password: String::new(),
             private_key: String::new(),
             key_passphrase: String::new(),
+            command: String::new(),
         }
     }
 }

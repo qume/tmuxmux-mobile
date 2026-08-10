@@ -52,7 +52,38 @@ leans on things this app can't do in-process:
   way to do that in-process, so these are **skipped** on import.
 
 So a desktop `hosts.toml` that's mostly cloudflared/alias hosts will import
-few or no usable entries. Direct-SSH hosts (host + password or key) work.
+few or no usable entries **directly**. Use a jump box instead (below).
+
+## Reaching a fleet through a jump box
+
+The clean way to reach hosts that need `cloudflared`, a `ProxyCommand`, or
+`~/.ssh/config` aliases: point every host at one reachable **jump box** that
+already has those tools, and let it do the work. A host's optional `command`
+runs on the box it connects to, with the tmux call appended at the far end:
+
+```
+phone ──(Tailscale, russh)──▶ jump box ──(command: cloudflared / ssh alias)──▶ target ──▶ tmux
+```
+
+So the phone only needs to reach the jump box (e.g. over Tailscale); the jump
+box runs `cloudflared access ssh …` or `ssh <alias>`. `scripts/gen_import.py`
+converts a desktop `hosts.toml` into an `import.json` wired this way:
+
+```sh
+# generate a phone key, authorise it on the jump box (optionally IP-locked):
+ssh-keygen -t ed25519 -f phone_key -N ""
+echo "from=\"<phone-tailnet-ip>\" $(cat phone_key.pub)" >> ~/.ssh/authorized_keys  # on the jump box
+
+python3 scripts/gen_import.py hosts.toml \
+  --jump-host <jump-tailnet-ip> --jump-user <user> --jump-key phone_key \
+  --out import.json
+adb push import.json /sdcard/Android/data/xyz.geocam.tmuxmux/files/import.json
+```
+
+Every host then routes through the jump box: local → tmux on the box,
+`ssh`-alias hosts → `ssh -tt <alias>`, cloudflared hosts → their original
+command verbatim. The phone must be on the same Tailscale tailnet (or otherwise
+able to reach the jump box) when connecting.
 
 ## Build
 

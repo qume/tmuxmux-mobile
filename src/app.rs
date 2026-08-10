@@ -439,6 +439,13 @@ impl TmuxmuxApp {
                         egui::TextEdit::singleline(&mut editor.host.key_passphrase).password(true),
                     );
                     ui.end_row();
+                    ui.label("Jump command");
+                    ui.add(
+                        egui::TextEdit::multiline(&mut editor.host.command)
+                            .desired_rows(2)
+                            .hint_text("optional; run on Host to reach a target, e.g. sshpass … ssh … dev@x"),
+                    );
+                    ui.end_row();
                 });
 
             ui.separator();
