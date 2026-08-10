@@ -2,6 +2,8 @@
 //! shown together, per the mobile design).
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use egui::{Color32, RichText};
@@ -58,6 +60,9 @@ pub struct TmuxmuxApp {
 
     editor: Option<HostEditor>,
     new_session: String,
+    /// Shared with the repaint-pump thread: true → repaint fast (active
+    /// session), false → slow (idle selector).
+    repaint_fast: Arc<AtomicBool>,
 }
 
 impl TmuxmuxApp {
@@ -70,10 +75,14 @@ impl TmuxmuxApp {
         cc.egui_ctx.style_mut(|s| s.visuals = egui::Visuals::dark());
 
         // Android eframe sometimes never issues the first RedrawRequested, so
-        // update() never runs. Drive repaints from a background thread.
+        // update() never runs. Drive repaints from a background thread, fast
+        // while a session is active and slow when idle to save battery.
         let ctx = cc.egui_ctx.clone();
+        let repaint_fast = Arc::new(AtomicBool::new(false));
+        let flag = repaint_fast.clone();
         std::thread::spawn(move || loop {
-            std::thread::sleep(Duration::from_millis(100));
+            let ms = if flag.load(Ordering::Relaxed) { 33 } else { 200 };
+            std::thread::sleep(Duration::from_millis(ms));
             ctx.request_repaint();
         });
 
@@ -104,6 +113,7 @@ impl TmuxmuxApp {
             font_size: 15.0,
             editor: None,
             new_session: String::new(),
+            repaint_fast,
         }
     }
 
@@ -544,10 +554,11 @@ impl eframe::App for TmuxmuxApp {
             View::Terminal => self.ui_terminal(ctx),
         }
 
-        // Steady repaint while connected so PTY output and status flow in
-        // without needing an input event to wake egui.
-        let active = self.conn.is_some();
-        ctx.request_repaint_after(Duration::from_millis(if active { 16 } else { 250 }));
+        // Repaint fast while a terminal is on screen (smooth typing/output),
+        // slow otherwise. The background pump reads this flag.
+        let fast = self.conn.is_some() && self.view == View::Terminal;
+        self.repaint_fast.store(fast, Ordering::Relaxed);
+        ctx.request_repaint_after(Duration::from_millis(if fast { 16 } else { 200 }));
     }
 }
 
