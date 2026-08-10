@@ -52,7 +52,17 @@ pub struct TmuxmuxApp {
 
 impl TmuxmuxApp {
     pub fn new(cc: &eframe::CreationContext<'_>, data_dir: PathBuf) -> Self {
+        log::info!("TmuxmuxApp::new: data_dir={}", data_dir.display());
         cc.egui_ctx.style_mut(|s| s.visuals = egui::Visuals::dark());
+
+        // Android eframe sometimes never issues the first RedrawRequested, so
+        // update() never runs. Drive repaints from a background thread.
+        let ctx = cc.egui_ctx.clone();
+        std::thread::spawn(move || loop {
+            std::thread::sleep(Duration::from_millis(100));
+            ctx.request_repaint();
+        });
+
         let config = Config::load(&data_dir);
         TmuxmuxApp {
             data_dir,

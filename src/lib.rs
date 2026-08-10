@@ -26,25 +26,28 @@ pub fn native_options() -> eframe::NativeOptions {
 #[cfg(target_os = "android")]
 #[no_mangle]
 fn android_main(app: winit::platform::android::activity::AndroidApp) {
-    use winit::platform::android::EventLoopBuilderExtAndroid;
-
     android_logger::init_once(
         android_logger::Config::default().with_max_level(log::LevelFilter::Info),
     );
+    std::panic::set_hook(Box::new(|info| {
+        log::error!("PANIC: {info}");
+    }));
 
     let data_dir = app
         .internal_data_path()
         .unwrap_or_else(|| std::path::PathBuf::from("/data/local/tmp"));
 
-    let app_for_loop = app.clone();
     let mut options = native_options();
-    options.event_loop_builder = Some(Box::new(move |builder| {
-        builder.with_android_app(app_for_loop);
-    }));
+    // eframe 0.34 wires the winit event loop to the activity via this field.
+    options.android_app = Some(app);
 
-    let _ = eframe::run_native(
+    log::info!("android_main: starting eframe");
+    match eframe::run_native(
         "tmuxmux",
         options,
         Box::new(move |cc| Ok(Box::new(TmuxmuxApp::new(cc, data_dir)))),
-    );
+    ) {
+        Ok(()) => log::info!("android_main: eframe exited cleanly"),
+        Err(e) => log::error!("android_main: eframe::run_native failed: {e:?}"),
+    }
 }
