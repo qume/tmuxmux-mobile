@@ -25,10 +25,11 @@ fn main() {
         .with_inner_size([420.0, 780.0])
         .with_title("tmuxmux-mobile");
 
+    let import = dir.clone();
     if let Err(e) = eframe::run_native(
         "tmuxmux-mobile",
         options,
-        Box::new(move |cc| Ok(Box::new(TmuxmuxApp::new(cc, dir)))),
+        Box::new(move |cc| Ok(Box::new(TmuxmuxApp::new(cc, dir, Some(import))))),
     ) {
         eprintln!("error: {e}");
         std::process::exit(1);

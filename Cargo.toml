@@ -23,6 +23,7 @@ russh = { version = "0.54", default-features = false, features = ["ring", "flate
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "io-util", "sync", "macros", "time", "net"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+toml = "0.8"
 log = "0.4"
 
 [target.'cfg(target_os = "android")'.dependencies]

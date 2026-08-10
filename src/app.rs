@@ -17,6 +17,16 @@ enum View {
     Terminal,
 }
 
+/// Rough Android status-bar height (points) so top panels don't sit under the
+/// system clock. Zero elsewhere. A proper safe-area inset is future work.
+fn status_bar_inset() -> f32 {
+    if cfg!(target_os = "android") {
+        28.0
+    } else {
+        0.0
+    }
+}
+
 /// The add/edit-host form, when open.
 struct HostEditor {
     /// Index being edited, or None for a new host.
@@ -51,7 +61,11 @@ pub struct TmuxmuxApp {
 }
 
 impl TmuxmuxApp {
-    pub fn new(cc: &eframe::CreationContext<'_>, data_dir: PathBuf) -> Self {
+    pub fn new(
+        cc: &eframe::CreationContext<'_>,
+        data_dir: PathBuf,
+        import_dir: Option<PathBuf>,
+    ) -> Self {
         log::info!("TmuxmuxApp::new: data_dir={}", data_dir.display());
         cc.egui_ctx.style_mut(|s| s.visuals = egui::Visuals::dark());
 
@@ -63,14 +77,22 @@ impl TmuxmuxApp {
             ctx.request_repaint();
         });
 
-        let config = Config::load(&data_dir);
+        let mut config = Config::load(&data_dir);
+        let mut import_status = None;
+        if let Some(dir) = import_dir {
+            if let Some(msg) = config.import_from(&dir) {
+                log::info!("import: {msg}");
+                config.save(&data_dir);
+                import_status = Some(msg);
+            }
+        }
         TmuxmuxApp {
             data_dir,
             config,
             view: View::Selector,
             conn: None,
             connected_idx: None,
-            status: "Select a host".into(),
+            status: import_status.unwrap_or_else(|| "Select a host".into()),
             sessions: Vec::new(),
             listed: false,
             parser: vt100_ctt::Parser::new(24, 80, 0),
@@ -229,6 +251,7 @@ impl TmuxmuxApp {
 
     fn ui_selector(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::top("sel_top").show(ctx, |ui| {
+            ui.add_space(status_bar_inset());
             ui.horizontal(|ui| {
                 ui.heading("tmuxmux");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -452,6 +475,7 @@ impl TmuxmuxApp {
 
     fn ui_terminal(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::top("term_top").show(ctx, |ui| {
+            ui.add_space(status_bar_inset());
             ui.horizontal(|ui| {
                 if ui.button("≡ Sessions").clicked() {
                     self.detach_to_selector();

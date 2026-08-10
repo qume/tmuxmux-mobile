@@ -6,10 +6,10 @@
 mod acs;
 mod app;
 mod colors;
-mod config;
+pub mod config;
 mod input;
 mod render;
-mod ssh;
+pub mod ssh;
 
 pub use app::TmuxmuxApp;
 
@@ -36,6 +36,9 @@ fn android_main(app: winit::platform::android::activity::AndroidApp) {
     let data_dir = app
         .internal_data_path()
         .unwrap_or_else(|| std::path::PathBuf::from("/data/local/tmp"));
+    // A config dropped into the app's external files dir (adb push-able,
+    // no extra permissions) is imported on launch.
+    let import_dir = app.external_data_path();
 
     let mut options = native_options();
     // eframe 0.34 wires the winit event loop to the activity via this field.
@@ -45,7 +48,7 @@ fn android_main(app: winit::platform::android::activity::AndroidApp) {
     match eframe::run_native(
         "tmuxmux",
         options,
-        Box::new(move |cc| Ok(Box::new(TmuxmuxApp::new(cc, data_dir)))),
+        Box::new(move |cc| Ok(Box::new(TmuxmuxApp::new(cc, data_dir, import_dir)))),
     ) {
         Ok(()) => log::info!("android_main: eframe exited cleanly"),
         Err(e) => log::error!("android_main: eframe::run_native failed: {e:?}"),
