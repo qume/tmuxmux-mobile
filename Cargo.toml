@@ -1,0 +1,63 @@
+[package]
+name = "tmuxmux-mobile"
+version = "0.1.0"
+edition = "2021"
+description = "Mobile tmux session selector + terminal (Android, iOS-ready)"
+
+[lib]
+name = "tmuxmux_mobile"
+# cdylib -> the .so Android loads; lib -> so the desktop bin can reuse the code.
+crate-type = ["cdylib", "lib"]
+
+[[example]]
+name = "desktop"
+path = "examples/desktop.rs"
+
+[dependencies]
+egui = "0.34"
+eframe = { version = "0.34", default-features = false, features = ["glow", "default_fonts"] }
+vt100-ctt = "0.17"
+# `ring` crypto backend cross-compiles to Android far more cleanly than the
+# default aws-lc-rs (which drags in cmake).
+russh = { version = "0.54", default-features = false, features = ["ring", "flate2", "rsa"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "io-util", "sync", "macros", "time", "net"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+log = "0.4"
+
+[target.'cfg(target_os = "android")'.dependencies]
+eframe = { version = "0.34", default-features = false, features = ["android-native-activity"] }
+winit = "0.30"
+android_logger = "0.14"
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+eframe = { version = "0.34", default-features = false, features = ["x11", "wayland"] }
+env_logger = "0.11"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+
+# ---- cargo-apk packaging (Android) ----
+[package.metadata.android]
+package = "xyz.geocam.tmuxmux"
+apk_name = "tmuxmux-mobile"
+build_targets = ["aarch64-linux-android"]
+
+[package.metadata.android.sdk]
+min_sdk_version = 24
+target_sdk_version = 34
+
+[package.metadata.android.application]
+label = "tmuxmux"
+
+# SSH needs the network.
+[[package.metadata.android.uses_permission]]
+name = "android.permission.INTERNET"
+
+# Release signing. This keystore is committed on purpose: it's a personal
+# tool (not Play Store), and stable signing lets you update the app in place
+# without uninstalling. Rotate/replace it if this ever becomes a real release.
+[package.metadata.android.signing.release]
+path = "release.keystore"
+keystore_password = "tmuxmux"
